@@ -1,0 +1,175 @@
+---
+title: "Trait Matrix"
+author: "Elena"
+date: "5/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+library(factoextra)
+library(reshape2)
+library(gridExtra)
+```
+
+```{r}
+# import trait distance matrix from luca
+# use the copy of the original file, I had to fix strain names Luca changed to match my data
+traits <- readxl::read_xlsx(here('data', 'traits_corrected.xlsx'), col_names = TRUE)
+rownames(traits) <- traits$strain
+traits <- data.matrix(traits)
+traits <- traits[, -1]
+traits_dist <- as.dist(traits) #can't melt a distance object
+
+# make a long table with distances between different strains
+traitsTab <- melt(traits, varnames = c("row", "col")) 
+colnames(traitsTab) <- c('strain1', 'strain2', 'dist_trait')
+
+traitsTab %>%
+  ggplot(aes(x = dist_trait)) +
+  geom_histogram(bins = 50) +
+  theme_classic() +
+  labs(title = "Functional distance between library strains",
+       x = "Trait distance")
+```
+
+## Gene Matrix
+
+```{r}
+# import gene distance matrix from luca
+# use the copy of the original file, I had to fix strain names Luca changed to match my data
+genes <- readxl::read_xlsx(here('data', 'genes_corrected.xlsx'), col_names = TRUE)
+rownames(genes) <- genes$strain.nickname
+genes <- data.matrix(genes)
+genes <- genes[, -1]
+genes_dist <- as.dist(genes) #can't melt a distance object
+
+# make a long table with distances between different strains
+genesTab <- melt(genes, varnames = c("row", "col")) # %>% filter(!value == 0) leave the diagonal in to join phyDist properly
+colnames(genesTab) <- c('strain1', 'strain2', 'dist_gene')
+
+genesTab %>%
+  ggplot(aes(x = dist_gene)) +
+  geom_histogram(bins = 100) +
+  theme_classic() +
+  labs(title = "Functional distance between library strains",
+       x = "gene distance")
+
+```
+
+## Comparing distances
+
+```{r}
+# get the pairwise cophenetic distances from phylogenetic tree
+phyDist <- read.csv(here('data', 'phyloDist.csv'))
+
+# phylogenetic and trait distances
+# dist_trait NAa result because luca did not calculate the functional distance between the library strains and pro or syn, can ignore these
+allDist <- phyDist %>% left_join(traitsTab, by = c('strain1', 'strain2')) %>% filter(!is.na(dist_trait))
+
+# add the gene distance
+# add data to distance df
+allDist <- allDist %>% left_join(genesTab, by = c('strain1', 'strain2')) 
+
+# gather the df to plot together
+allDist2 <- allDist %>% pivot_longer(cols = c(dist_phylo, dist_trait, dist_gene), names_to = "type", values_to = "dist")
+```
+
+```{r}
+# violin plots
+allDist2 %>% 
+  ggplot(aes(x = type, y = dist, fill = type)) +
+  geom_violin(alpha = .5) +
+  theme_classic() +
+  labs(title = 'Distributions of gene, trait, and phylogenetic distances',
+       x = 'Distance Type',
+       y = 'Distance Value')
+
+```
+
+## Growth distance
+
+```{r}
+# see format_growth_profile.Rmd for explanation of code
+source(here('growthProfiles.R'))
+```
+
+```{r}
+# get distance between growth profiles
+# delta_OD is from man1v2.Rmd
+gp <- dist(deltaOD[-1])
+gpMat <- data.matrix(gp)
+rownames(gpMat) <- deltaOD$strain
+colnames(gpMat) <- deltaOD$strain
+
+delta_OD <- dODfinal %>% 
+  filter(!strain == 'negative') %>%
+  dplyr::select(strain, medium, deltaOD) %>% 
+  distinct() %>%
+  pivot_wider(names_from = medium, values_from = deltaOD) %>%
+  dplyr::select(strain, difcoMB, HMBcmpt, HMBpep, HMBaa, HMBlips, HMBoligo, HMBorg, HMBntrl, HMBamisug, HMBacdsug, `HMB--`)
+rownames(delta_OD) <- delta_OD$strain
+
+# make a long table with distances between different strains
+gpTab <- melt(gpMat, varnames = c("row", "col"))  
+colnames(gpTab) <- c('strain1', 'strain2', 'dist_gp')
+
+gpDist <- allDist %>% inner_join(gpTab, by = c('strain1', 'strain2')) %>%
+  filter(!strain1 == strain2) 
+```
+
+## plots and regression
+
+```{r}
+a <- gpDist %>%
+  filter(!strain1 == strain2) %>%
+  ggplot(aes(x = dist_phylo, y = dist_gp)) +
+  geom_point(alpha = .5) +
+  geom_smooth(method = "lm", formula = 'y ~ x') +
+  theme_classic() +
+  theme(text = element_text(size = 14),
+        axis.title.x = element_blank()) +
+  labs(x = '',
+      y = '')
+b <- gpDist %>%
+  filter(!strain1 == strain2) %>%
+  ggplot(aes(x = dist_gene, y = dist_gp)) +
+  geom_point(alpha = .5) +
+  geom_smooth(method = "lm", formula = 'y ~ x') +
+  theme_classic() +
+  theme(text = element_text(size = 14),
+        axis.title.x = element_blank()) +
+  labs(x = '',
+      y = '')
+c <- gpDist %>%
+  filter(!strain1 == strain2) %>%
+  ggplot(aes(x = dist_trait, y = dist_gp)) +
+  geom_point(alpha = .5) +
+  geom_smooth(method = "lm", formula = 'y ~ x') +
+  theme_classic() +
+  theme(text = element_text(size = 14),
+        axis.title.x = element_blank()) +
+  labs(x = '',
+      y = '')
+
+cowplot::plot_grid(a, b, c, nrow = 1)
+```
+
+```{r}
+# linear regression
+lm1 <- lm(dist_gp ~ dist_trait, gpDist)
+summary(lm1)
+plot(lm1)
+
+lm2 <- lm(dist_gp ~ dist_gene, gpDist)
+summary(lm2)
+plot(lm2)
+
+lm3 <- lm(dist_gp ~ dist_phylo, gpDist)
+summary(lm3)
+plot(lm3)
+#rm(p1, p2, lm1, lm2)
+```
+

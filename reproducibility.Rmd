@@ -1,0 +1,162 @@
+---
+title: "Growth Profile Formatting"
+author: "Elena"
+date: "1/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(here)
+library(tidyverse)
+library(ggpubr)
+library(viridis)
+```
+
+## Growth Profile Data
+
+```{r}
+# see format_growth_profiles_new.Rmd for explanation of code
+source(here('growthProfiles.R'))
+```
+
+```{r warning=FALSE}
+### figure S1 ###
+dODfinal <- dODfinal %>%
+  group_by(strain, medium) %>%
+  mutate(sdODavg = sd(dOD))
+
+median(dODfinal$sdODavg) # for dashed line in plot below
+
+q <- dODfinal %>%
+  select(grp, strain, medium, sdODavg) %>%
+  distinct() %>%
+  ggplot(aes(x = sdODavg)) +
+  geom_histogram(bins = 100) +
+  geom_vline(xintercept = 0.0149, linetype = "dashed", color = "red") +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "Standard Deviation Max Change in OD600",
+       y = "Count")
+
+# strains repeated in 2 or more experiments
+repStr <- dODfinal %>%
+  ungroup() %>%
+  select(exp, strain) %>%
+  distinct() %>%
+  group_by(strain) %>%
+  mutate(num = n()) %>%
+  filter(num > 1) %>%
+  select(strain) %>%
+  distinct()
+
+w <- dODfinal %>%
+  filter(strain %in% repStr$strain) %>%
+  select(exp, grp2, grp, medium, strain, dOD) %>%
+  ggplot(aes(x = medium, y = dOD)) +
+  geom_point(alpha = .5) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 1),
+        text = element_text(size = 14)) +
+  facet_wrap(~strain) +
+  labs(x = "Medium",
+       y = "Maximim Change in OD600")
+```
+
+```{r warning=FALSE}
+e <- dODfinal %>%
+  ungroup() %>%
+  filter(strain %in% repStr$strain) %>%
+  select(exp) %>%
+  distinct()
+
+c <- combn(e$exp, 2)
+
+a <- dODfinal %>%
+  ungroup() %>%
+  filter(strain %in% repStr$strain) %>%
+  group_by(strain, medium, exp) %>%
+  mutate(dODavg = mean(dOD)) %>%
+  select(exp, strain, medium, dODavg) %>%
+  distinct() %>%
+  pivot_wider(names_from = exp, values_from = dODavg)
+
+p1 <- a %>%
+  ggplot(aes(x = ge2, y = ge3)) +
+  geom_point() +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "Experiment ge2",
+       y = "Experiment ge3") +
+  xlim(0, 1.5) +
+  ylim(0, 1.5) 
+
+p2 <- a %>%
+  ggplot(aes(x = ge2, y = ge4)) +
+  geom_point() +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "Experiment ge2",
+       y = "Experiment ge4") +
+  xlim(0, 1.5) +
+  ylim(0, 1.5) 
+
+p3 <- a %>%
+  ggplot(aes(x = ge2, y = ge5)) +
+  geom_point() +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "Experiment ge2",
+       y = "Experiment ge5") +
+  xlim(0, 1.5) +
+  ylim(0, 1.5) 
+
+p4 <- a %>%
+  ggplot(aes(x = ge3, y = ge4)) +
+  geom_point() +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "Experiment ge3",
+       y = "Experiment ge4") +
+  xlim(0, 1.5) +
+  ylim(0, 1.5) 
+
+p5 <- a %>%
+  ggplot(aes(x = ge3, y = ge5)) +
+  geom_point() +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "Experiment ge3",
+       y = "Experiment ge5") +
+  xlim(0, 1.5) +
+  ylim(0, 1.5) 
+
+p6 <- a %>%
+  ggplot(aes(x = ge4, y = ge5)) +
+  geom_point() +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "Experiment ge4",
+       y = "Experiment ge5") +
+  xlim(0, 1.5) +
+  ylim(0, 1.5) 
+
+cowplot::plot_grid(w, q, ncol = 2)
+cowplot::plot_grid(p1, p2, p3, p4, p5, p6, ncol = 3)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,111 @@
+---
+title: "corrected media stoich"
+author: "Elena"
+date: "3/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+```{r}
+rats <- readxl::read_xlsx('corrected media stoich.xlsx', col_names = TRUE, range = "A1:J10") %>%
+  select(medium, N)
+
+dODfinal %>%
+  select(strain, medium, deltaOD) %>%
+  distinct() %>%
+  inner_join(rats,  by = "medium") %>%
+  ggplot(aes(x = N, y = deltaOD)) +
+  geom_point() +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x =  "mol N",
+       y = "Max Change in OD600")
+```
+
+```{r}
+dODfinal %>%
+  select(strain, medium, deltaOD) %>%
+  distinct() %>%
+  inner_join(rats,  by = "medium") %>%
+  ggplot(aes(x = N, y = deltaOD)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = "y ~ x") +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x =  "mol N",
+       y = "Max Change in OD600")
+
+```
+
+```{r}
+dat <- dODfinal %>%
+  select(strain, medium, deltaOD) %>%
+  distinct() %>%
+  inner_join(rats,  by = "medium") 
+
+molN.lm <- lm(deltaOD ~ N, dat)
+summary(molN.lm)
+plot(molN.lm)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
