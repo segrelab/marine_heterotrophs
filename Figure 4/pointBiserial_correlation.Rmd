@@ -1,0 +1,180 @@
+---
+title: "Point Biserial By Hand"
+author: "Elena"
+date: "6/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+library(factoextra)
+library(ggpubr)
+library(viridis)
+```
+
+This file was used to calculate the correlation between growth on each medium and individual genes in the pangenome. It was also used to do PCA in Figure 4B.
+
+```{r}
+# see format_growth_profile.Rmd for explanation of code
+source(here('data', 'growthProfiles.R'))
+rm(cleanGE, dOD)
+
+# Gene annotation and KEGG module distances 
+ann <- readxl::read_xlsx(here('data', 'ann_master.xlsx'), col_names = TRUE)
+
+# Remove everything without a KO
+annKO <- ann %>% 
+  dplyr::rename(strain = strain.nickname) %>%
+  filter(!KO == "NA" & strain %in% deltaOD$strain)
+
+# create wide matrix of KO presence/absence
+# note that annWide has 60 rows (strains) because I don't have annotated genomes for luca8, Pinhib or B2china
+annWide <- annKO %>% 
+  select(strain, KO) %>% 
+  distinct() %>% 
+  mutate(genfill = 1) %>%
+  pivot_wider(names_from = KO, values_from = genfill) %>%
+  replace(is.na(.), 0)
+```
+
+```{r}
+# subset for strains that have genomic and growth info (not all strains that were annotated were tested experimentally on HMB media, and not all cultured strains have genomes)
+gpSub <- deltaOD %>% 
+  inner_join(select(annWide, strain), by = 'strain') %>%
+  arrange(strain)
+geneSub <- annWide %>% 
+  filter(strain %in% gpSub$strain) %>% 
+  arrange(strain)
+```
+
+```{r}
+# function returns point biserial correlation 
+getPBcorr <- function(med) {
+  corList <- list()
+  for (i in 2:ncol(geneSub)) {
+    # subset the data
+    dat <- tibble(gps = gpSub[[med]], gen = geneSub[[i]])
+    n <- nrow(dat)
+    # compute the standard deviation of interval scale data
+    x_avg <- mean(dat$gps)
+    x_sd <- sqrt(sum((x_avg - dat$gps)^2)/(n - 1))
+    # compute the means and proportions of the values associated with each category of dichotomous variable
+    x0 <- filter(dat, gen == 0)
+    avg_0 <- mean(x0$gps)
+    prop_0 <- nrow(x0)/n
+    x1 <- filter(dat, gen == 1)
+    avg_1 <- mean(x1$gps)
+    prop_1 <- nrow(x1)/n
+    # compute the point biserial correlation
+    # the sign depends on order of dichotomous variable, but I've ordered the variables so I can interpret like so:
+    # negative rpb results when the average dOD is higher for strains that do NOT have the gene, 
+    #therefore high growth is correlated with the absence of a gene.
+    rpb <- (avg_1 - avg_0)*(1/x_sd)*sqrt(prop_0*prop_1)
+    # since n is large, can use large sample approximate (z-score) to examine the values for significance
+    # find z-score using approximation to normal distribution
+    z <- rpb*sqrt(n-1)
+    # convert z-score to p-value
+    p <- 2*pnorm(-abs(z))
+    # For a two-tailed test with alpha = 0.05, reject Ho if -1.96 <= z <= 1.96.
+    rej_z <- abs(z) > 1.96 
+    # Alternatively, the critical values of the Pearson product-moment correlation coefficient for a two-tailed test 
+    #with df = 60 and alpha = .05 is .250. Therefore, we reject Ho for cases where |r| > .250
+    rej_cval <- abs(rpb) > .25
+    ## confidence interval ##
+    # Fisher r to z' transformation
+    z1 <- log(sqrt((1+rpb)/(1-rpb))) # equivalent arctanh(rpb)
+    # standard error of z1
+    sez1 <- 1/(sqrt(n-3)) 
+    # 95% confidence interval for z1
+    cil_z1 <- z1 - 1.96*sez1
+    cih_z1 <- z1 + 1.96*sez1
+    # convert the confidence interval back to rpb (un-z-score it)
+    cil_rpb <- (exp(2*cil_z1) - 1)/(exp(2*cil_z1) + 1)
+    cih_rpb <- (exp(2*cih_z1) - 1)/(exp(2*cih_z1) + 1)
+    # add to list
+    corList[[i-1]] <- c(medium = med, gene = colnames(geneSub[i]), pbCorr = rpb, CIlo = cil_rpb, CIhi = cih_rpb,
+                        rejHo_z = rej_z, rejHo_cv = rej_cval, n_0 = nrow(x0), n_1 = nrow(x1), pval = p)
+  }
+  corDF <- bind_rows(lapply(corList, as.data.frame.list, stringsAsFactors = FALSE)) %>%
+    mutate(p.adj = p.adjust(pval, method = 'BH'))
+  # why are these characters?
+  corDF$pbCorr <- as.numeric(corDF$pbCorr)
+  corDF$CIlo <- as.numeric(corDF$CIlo)
+  corDF$CIhi <- as.numeric(corDF$CIhi)
+  corDF$pval <- as.numeric(corDF$pval)
+  corDF$p.adj <- as.numeric(corDF$p.adj)
+  corDF$n_1 <- as.numeric(corDF$n_1)
+  corDF$n_0 <- as.numeric(corDF$n_0)
+  return(corDF)
+}
+```
+
+```{r}
+# run the same loop to generate all individual correlations 
+meds <- colnames(select(gpSub, -strain))
+
+for (i in meds) {
+  res <- getPBcorr(i)
+  assign(paste0('rpb_', i), res)
+}
+
+rm(i, res)
+```
+
+```{r}
+# make one giant df...
+rpb_all <- bind_rows(rpb_difcoMB, rpb_HMBcmpt, rpb_HMBpep, rpb_HMBaa, 
+                       rpb_HMBlips, rpb_HMBoligo, rpb_HMBorg, rpb_HMBntrl, 
+                       rpb_HMBamisug, rpb_HMBacdsug, `rpb_HMB--`) 
+# remove individual dfs to clean up 
+rm(rpb_difcoMB, rpb_HMBcmpt, rpb_HMBpep, rpb_HMBaa, rpb_HMBlips, rpb_HMBoligo,
+   rpb_HMBorg, rpb_HMBntrl, rpb_HMBamisug, rpb_HMBacdsug, `rpb_HMB--`) 
+
+# make the media factors to order data in plots
+rpb_all$medium <- factor(rpb_all$medium, 
+                           levels = c('difcoMB', 'HMBcmpt', 'HMBpep', 'HMBaa', 'HMBlips', 'HMBoligo', 
+                                      'HMBorg', 'HMBntrl', 'HMBamisug', 'HMBacdsug', 'HMB--'))
+
+# genes present in all strains have correlation values that are not a nummber (NaN), eliminate those
+rpb_all <- rpb_all %>%
+  filter(!pbCorr == 'NaN')
+
+## Supplementary Table S5 ##
+#writexl::write_xlsx(rpb_all, 'all_high_r_ko.xlsx')
+```
+
+## PCA
+
+```{r}
+wide_rko <- rpb_all %>%
+  rename('KO' = gene) %>%
+  select(medium, KO, pbCorr) %>% 
+  distinct() %>%
+  pivot_wider(names_from = 'KO', values_from = 'pbCorr') 
+
+x <- select(wide_rko, - medium)
+rownames(x) <- wide_rko$medium
+
+# compute PCA
+res.pca <- prcomp(x, scale = FALSE)
+```
+
+## Individuals (media)
+
+```{r}
+## Figure 4B ##
+# graph of individuals
+fviz_pca_ind(res.pca,
+             col.ind = "contrib", # Color by the quality of representation
+             gradient.cols = c("#fde725", "#21918c", "#440154"),
+             repel = TRUE   # Avoid text overlapping
+) +
+  theme_classic() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "Dimension 1 (64.3%)",
+       y = "Dimension 2 (16.7%)",
+       title = "",
+       color = "Contribution (%)")
+```
