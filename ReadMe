@@ -1,0 +1,18 @@
+The data and R markdown files in this repository were used to perform the
+analyses and generate the figures and supplementary tables for
+[***paper citation].
+
+The paper, along with all supplementary materials can be found here:
+[***link]
+
+This repository is organized according to the primary figures, with each
+directory containing the .Rmd file used to generate the figures. The data for
+all figures is located in the data directory. The Supplementary Figures
+directory contains the .Rmd files used to generate Supplementary Figures S1, S2,
+and S4. The code to generate Supplementary Figures S3, S5, and S6 is located in
+the .Rmd files for primary Figures 1, 5, and 2, respectively.
+
+For a description of the .Rmd files, including a list of the primary and
+supplementary figures generated with each file, please see `File Descriptions`.
+`File Descriptions` also includes which Supplementary Tables are relevant to
+each .Rmd file.
