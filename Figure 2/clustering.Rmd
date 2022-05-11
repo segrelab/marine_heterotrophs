@@ -1,0 +1,311 @@
+---
+title: "Untitled"
+author: "Elena"
+date: "1/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(tidyverse)
+library(mclust)
+library(cowplot)
+```
+
+This file was used to cluster the growth profiles, make the associated figures, and test the clusters for enrichment of bacterial classes.
+
+```{r}
+source(here('data', 'growthProfiles.R'))
+```
+
+## GMM clustering
+
+```{r}
+# deltaOD has mean dOD for each strain/medium pair
+dat <- dplyr::select(deltaOD, -strain)
+rownames(dat) <- deltaOD$strain
+
+# Apply GMM model, try 1-15 clusters
+gp_mc <- Mclust(dat, 1:15)
+summary(gp_mc)
+```
+
+```{r}
+### Supplementary Figure S6 ###
+# cluster stats
+# note: not all models generate results for all cluster sizes (none if model cannot converge on optimal results)
+plot(gp_mc, what = 'BIC', 
+     legendArgs = list(x = "bottomright", ncol = 5))
+```
+
+```{r}
+# classification of each strain into clusters
+strClass <- data.frame(
+  strain = deltaOD$strain,
+  cluster = gp_mc$classification)
+
+gpMclust <- deltaOD %>% inner_join(strClass, by = 'strain') %>%
+  inner_join(dplyr::select(tax, strain, class, order, family), by = 'strain') %>%
+  arrange(cluster, class, order, family, strain) %>%
+  dplyr::select(-class, -order, -family) 
+```
+
+```{r}
+### Figure 2 heatmap ###
+y <- dplyr::select(gpMclust, -strain, -cluster) %>% ungroup()
+rownames(y) <- gpMclust$strain
+# heatmap 
+pheatmap::pheatmap(t(y),
+                   cluster_rows = FALSE,
+                   cluster_cols = FALSE,
+                   gaps_col = c(14, 28, 36, 45, 49, 53),
+                   color = viridis::viridis(100),
+                   fontsize_col = 14)
+
+#rm(y)
+```
+
+```{r}
+# wrangle cluster data for plots
+gpMclust_long <- gpMclust %>%
+  pivot_longer(c(-strain, -cluster), names_to = 'medium', values_to = 'dOD') 
+gpMclust_long$medium <- factor(gpMclust_long$medium, 
+                       levels = c('difcoMB', 'HMBcmpt', 'HMBpep', 'HMBaa', 'HMBlips', 'HMBoligo', 
+                                  'HMBorg', 'HMBntrl', 'HMBamisug', 'HMBacdsug', 'HMB--'))
+```
+
+```{r}
+### Figure 2 panel A ###
+a <- gpMclust_long %>%
+  ggplot(aes(x = medium, y = dOD, color = medium)) +
+  geom_point(alpha = .5) +
+  geom_boxplot(outlier.size = -1) +
+  facet_wrap(~cluster, ncol = 7) +
+  theme_classic() +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        text = element_text(size = 16),
+        legend.position = "none"
+        ) +
+  scale_color_manual(values = c("#A5AA99", "#5D69B1", "#52BCA3", "#99C945", "#CC61B0",
+                                "#24796C", "#DAA51B", "#2F8AC4", "#764E9F", "#ED645A",
+                                "#E58606")) +
+  labs(y = 'Max Change in OD600')
+# legend for panel A
+legA <- ggpubr::get_legend(
+  gpMclust_long %>%
+  ggplot(aes(x = medium, y = dOD, color = medium)) +
+  geom_point(size = 2) +
+  theme_classic() +
+  theme(legend.position = "right",
+        text = element_text(size = 16)) +
+  scale_color_manual(values = c("#A5AA99", "#5D69B1", "#52BCA3", "#99C945", "#CC61B0",
+                                "#24796C", "#DAA51B", "#2F8AC4", "#764E9F", "#ED645A",
+                                "#E58606")) +
+    labs(color = "Medium")
+)
+
+### Figure 2 panel B ###
+b <- gpMclust_long %>%
+  mutate(medium = as.character(medium)) %>%
+  mutate(growth = ifelse(dOD == 0, 'AAnogrowth', medium)) %>%
+  mutate(medium = factor(medium, 
+                       levels = c('AAnogrowth',
+                                  'difcoMB', 'HMBcmpt', 'HMBpep', 'HMBaa', 'HMBlips', 'HMBoligo', 
+                                  'HMBorg', 'HMBntrl', 'HMBamisug', 'HMBacdsug', 'HMB--'
+                                  ))) %>%
+  mutate(growth = factor(growth, 
+                   levels = c('AAnogrowth',
+                              'difcoMB', 'HMBcmpt', 'HMBpep', 'HMBaa', 'HMBlips', 'HMBoligo', 
+                              'HMBorg', 'HMBntrl', 'HMBamisug', 'HMBacdsug', 'HMB--'
+                              ))) %>%
+  ggplot(aes(x = medium, fill = growth)) +
+  geom_bar(position = 'fill',) +
+  facet_wrap(~cluster, ncol = 8) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), 
+        axis.ticks.x = element_blank(), 
+        axis.title.x = element_blank(),
+        legend.position = "none",
+        text = element_text(size = 16),
+        strip.background = element_blank(), strip.text = element_blank()) +
+  scale_fill_manual(values = c("#000000",
+                               "#A5AA99", "#5D69B1", "#52BCA3", "#99C945", "#CC61B0",
+                                "#24796C", "#DAA51B", "#2F8AC4", "#764E9F", "#ED645A",
+                                "#E58606")) +
+  labs(y = "Proportion of Growing Strains")
+
+### Figure 2 panel C ###
+c <- gpMclust %>%
+  inner_join(dplyr::select(tax, strain, phylum, class, order, family, gnm_GFC), by = 'strain') %>%
+  rename(gfc = gnm_GFC) %>%
+  mutate(dummy = 1) %>%
+  ggplot(aes(x = dummy, fill = class)) +
+  geom_bar(position = 'fill', color = 'black') +
+  facet_grid(~cluster) +
+  theme_classic() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        legend.position = "bottom",
+        text = element_text(size = 16),
+        strip.background = element_blank(), strip.text = element_blank()) +
+  guides(fill = "none") +
+  scale_fill_viridis_d(aesthetics = 'fill', option = 'plasma', alpha = .8) +
+  labs(x = '',
+       y = 'Proportion of Class')
+# legend for panel C
+legC <- ggpubr::get_legend(gpMclust %>%
+    inner_join(dplyr::select(tax, strain, phylum, class, order, family, gnm_GFC), by = 'strain') %>%
+    rename(gfc = gnm_GFC) %>%
+    mutate(dummy = 1) %>%
+    ggplot(aes(x = dummy, fill = class)) +
+    geom_bar(position = 'fill', color = 'black') +
+    theme_classic() +
+    theme(legend.position = "right",
+          text = element_text(size = 16),
+          strip.background = element_blank(), strip.text = element_blank()) +
+    scale_fill_viridis_d(aesthetics = 'fill', option = 'plasma', alpha = .8) +
+    labs(fill = "Class")
+)
+```
+
+```{r}
+## Figure 2A-C
+# stitch plots together
+p1 <- plot_grid(b, c, nrow = 2)
+p2 <- plot_grid(NULL, a, nrow = 1, rel_widths = c(.007, 1))
+p3 <- plot_grid(p2, p1, nrow = 2, 
+                rel_heights = c(1,2))
+p3
+```
+
+```{r}
+# print the label for classes
+gpMclust %>%
+  inner_join(dplyr::select(tax, strain, phylum, class, order, family, gnm_GFC), by = 'strain') %>%
+  rename(gfc = gnm_GFC) %>%
+  mutate(dummy = 1) %>%
+  ggplot(aes(x = dummy, fill = class)) +
+  geom_bar(position = 'fill', color = 'black') +
+  facet_grid(~cluster) +
+  theme_classic() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        legend.position = "bottom",
+        text = element_text(size = 16),
+        strip.background = element_blank(), strip.text = element_blank()) +
+  guides(fill = guide_legend(ncol = 1, title.position = "top")) +
+  scale_fill_viridis_d(aesthetics = 'fill', option = 'plasma', alpha = .8) +
+  labs(x = '',
+       y = 'Proportion of Class')
+```
+
+## Test significance of phylogenetic composition of clusters
+  
+```{r}
+# test difference in proportions of strain classes per cluster 
+x <- gpMclust %>%
+  inner_join(dplyr::select(tax, strain, phylum, class, order, family, gnm_GFC), by = 'strain') %>%
+  rename(gfc = gnm_GFC) %>%
+  group_by(cluster, class) %>%
+  mutate(num = n()) %>%
+  dplyr::select(cluster, class, num) %>%
+  distinct() %>%
+  pivot_wider(names_from = 'class', values_from = 'num') %>%
+  ungroup() 
+x[is.na(x)] <- 0
+
+y <- dplyr::select(x, -cluster)
+
+# Note that simulate.p.value = TRUE  
+set.seed(123)
+res.chi <- chisq.test(y, simulate.p.value = TRUE)
+res.chi
+
+chisq.test(y)
+```
+
+```{r}
+### Supplementary Table S3 ###
+z <- (res.chi$stdres)^2
+#writexl::write_xlsx(as.data.frame(z), "supplementaryTabS3.xlsx")
+```
+
+## Differences in growth w/i and between clusters
+
+```{r}
+# Statistically significant difference in growth on each medium BETWEEN clusters
+# i.e. Was there more growth on HMBcmpt in cluster 1 or 2?
+# Dunn's test for all pairs of clusters on each medium
+meds <- colnames(gpMclust)[2:12]
+clust.dunn <- tibble()
+for (m in meds) {
+  dat <- gpMclust %>%
+    pivot_longer(difcoMB:`HMB--`, names_to = 'medium', values_to = 'dOD') %>%
+    filter(medium == m)
+  med.dn <- FSA::dunnTest(dOD ~ as.factor(cluster), dat, method = 'none', two.sided = TRUE)
+  x <- med.dn[[2]] %>% separate(Comparison, c("cluster1", "cluster2"), sep = ' - ') %>% 
+    mutate(medium = m)
+  clust.dunn <- bind_rows(clust.dunn, x)
+}
+rm(meds, dat, med.dn, x, m)
+
+# correct p.values for multiple comparisons
+clust.dunn <- clust.dunn %>%
+  dplyr::select(-P.adj) %>%
+  mutate(p.adjusted = p.adjust(P.unadj, method = 'BH'),
+         sig = ifelse(p.adjusted < 0.05, 'yes', 'no')) %>%
+  dplyr::select(medium, cluster1, cluster2, Z, P.unadj, p.adjusted, sig)
+
+clust.dunn$medium <- factor(clust.dunn$medium, 
+                            levels = c('difcoMB', 'HMBcmpt', 'HMBpep', 'HMBaa', 'HMBlips', 'HMBoligo', 
+                                       'HMBorg', 'HMBntrl', 'HMBamisug', 'HMBacdsug', 'HMB--'))
+```
+
+```{r warning=FALSE}
+# Statistically significant difference in growth on each medium WITHIN clusters
+# i.e. Was there more growth on HMBcmpt or HMBpep in cluster 1?
+# Dunn's test for all pairs of clusters on each medium
+meds.dunn <- tibble()
+for (i in 1:7) {
+  dat <- gpMclust %>%
+    pivot_longer(difcoMB:`HMB--`, names_to = 'medium', values_to = 'dOD') %>%
+    filter(cluster == i)
+  med.dn <- FSA::dunnTest(dOD ~ medium, dat, method = 'none', two.sided = TRUE)
+  x <- med.dn[[2]] %>% separate(Comparison, c("med1", "med2"), sep = ' - ') %>% 
+    mutate(cluster = i)
+  meds.dunn <- bind_rows(meds.dunn, x)
+}
+rm(dat, med.dn, x, i)
+
+# correct p.values for multiple comparisons
+meds.dunn <- meds.dunn %>%
+  dplyr::select(-P.adj) %>%
+  mutate(p.adjusted = p.adjust(P.unadj, method = 'BH'),
+         sig = ifelse(p.adjusted < 0.05, 'yes', 'no')) %>%
+  dplyr::select(cluster, med1, med2, Z, P.unadj, p.adjusted, sig)
+
+## Supplementary Table S4 ##
+#writexl::write_xlsx(meds.dunn, here('final_figures', 'dunn_test_wiClusters.xlsx'))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
